@@ -1,0 +1,76 @@
+---
+- name: Validate the sudoers file before saving
+  ansible.builtin.lineinfile:
+    path: "{{ kafka_install_dir }}/config/kraft/server.properties"
+    state: present
+    regexp: "{{ item.reg }}"
+    line: "{{ item.line }}"
+  loop:
+    - { reg: '{{ kafka_file_line1 }}', line: '{{ kafka_file1 }}' }
+    - { reg: '{{ kafka_file_l }}', line: '{{ kafka_file }}'}
+
+- name: Restart kafka
+  ansible.builtin.systemd:
+    name: kafka
+    state: restarted
+    enabled: true
+
+- name: Create SASL users on first broker
+  ansible.builtin.shell: |
+    {{ kafka_install_dir }}/bin/kafka-configs.sh --bootstrap-server localhost:9094 \
+      --command-config /tmp/root.properties \
+      --alter --add-config 'SCRAM-SHA-512=[password={{ item.password }}]' \
+      --entity-type users --entity-name {{ item.username }}
+  become: true
+  become_user: "{{ kafka_user }}"
+  loop: "{{ kafka_sasl_users }}"
+  when: inventory_hostname == "kafka1"
+  retries: 3
+  delay: 10
+  register: kafka_sasl_user_create
+  changed_when: "'Completed updating config for user admin.' in kafka_sasl_user_create.stdout"
+
+- name: Validate the sudoers file before saving
+  ansible.builtin.lineinfile:
+    path: "{{ kafka_install_dir }}/config/kraft/server.properties"
+    state: present
+    regexp: "{{ item.reg }}"
+    line: "{{ item.line }}"
+  loop:
+    - { line: '{{ kafka_file_line1 }}', reg: '{{ kafka_file1 }}' }
+    - { line: '{{ kafka_file_l }}', reg: '{{ kafka_file }}' }
+
+- name: Restart kafka
+  ansible.builtin.systemd:
+    name: kafka
+    state: restarted
+    enabled: true
+
+- name: Create topic
+  ansible.builtin.shell: |
+    {{ kafka_install_dir }}/bin/kafka-topics.sh \
+      --bootstrap-server localhost:9094 \
+      --command-config /opt/kafka/config/client.properties \
+      --create --topic secure-test --partitions 3 --replication-factor 3
+  become: true
+  become_user: "{{ kafka_user }}"
+  when: inventory_hostname == "kafka1"
+  register: kafka_create_topic
+  changed_when: "'Created topic secure-test.' in kafka_create_topic.stdout"
+
+- name: Check cluster status
+  ansible.builtin.shell: |
+    {{ kafka_install_dir }}/bin/kafka-topics.sh \
+      --bootstrap-server localhost:9094 \
+      --command-config {{ kafka_install_dir }}/config/client.properties \
+      --describe
+  become: true
+  become_user: "{{ kafka_user }}"
+  when: inventory_hostname == "kafka1"
+  register: kafka_check_cluster
+  changed_when: kafka_check_cluster.rc != 0
+
+- name: Display created SASL users
+  ansible.builtin.debug:
+    var: kafka_check_cluster.stdout
+  when: inventory_hostname == "kafka1"
