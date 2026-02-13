@@ -1,0 +1,73 @@
+# Process Role
+process.roles=broker,controller
+node.id={{ kafka_nodes | selectattr('host', 'equalto', inventory_hostname) | map(attribute='id') | first }}
+
+# Listeners
+listeners={{ kafka_listeners }}
+advertised.listeners={{ kafka_advertised_listeners }}
+listener.security.protocol.map=CONTROLLER:SASL_SSL,INTERNAL:SASL_SSL,EXTERNAL:SASL_SSL
+inter.broker.listener.name={{ kafka_inter_broker_listener_name }}
+
+# Controller Configuration
+controller.listener.names=CONTROLLER
+controller.quorum.voters={% for node in kafka_nodes %}{{ node.id }}@{{ node.host }}:9093{% if not loop.last %},{% endif %}{% endfor %}
+
+controller.quorum.election.timeout.ms=5000
+controller.quorum.fetch.timeout.ms=2000
+
+# JAAS конфигурация
+listener.name.controller.plain.sasl.jaas.config.context.name=KafkaServer
+sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="admin" password="admin-secret";
+
+listener.name.controller.sasl.enabled.mechanisms=PLAIN
+listener.name.controller.plain.sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username="admin" password="admin-secret" user_admin="admin-secret";
+
+listener.name.internal.sasl.enabled.mechanisms={{ kafka_sasl_mechanism }}
+listener.name.internal.scram-sha-512.sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="admin" password="admin-secret";
+
+listener.name.external.sasl.enabled.mechanisms={{ kafka_sasl_mechanism }}
+listener.name.external.scram-sha-512.sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="admin" password="admin-secret" user_admin="admin-secret";
+
+# Log directories
+log.dirs={{ kafka_data_dir }}
+
+# SSL Configuration
+{% if kafka_ssl_enabled %}
+ssl.keystore.location={{ kafka_ssl_dir }}/kafka.server.keystore.jks
+ssl.keystore.password={{ kafka_ssl_keystore_password }}
+ssl.key.password={{ kafka_key_password }}
+ssl.truststore.location={{ kafka_ssl_dir }}/kafka.server.truststore.jks
+ssl.truststore.password={{ kafka_ssl_truststore_password }}
+ssl.client.auth=required
+ssl.protocol=TLSv1.3
+ssl.enabled.protocols=TLSv1.3
+ssl.truststore.type=JKS
+ssl.keystore.type=JKS
+{% endif %}
+
+# SASL Configuration
+{% if kafka_sasl_enabled %}
+sasl.enabled.mechanisms={{ kafka_sasl_mechanism }},PLAIN
+sasl.mechanism.inter.broker.protocol={{ kafka_sasl_mechanism }}
+security.protocol=SASL_SSL
+sasl.mechanism.controller.protocol=PLAIN
+{% endif %}
+
+# Default replication factors
+num.partitions={{ kafka_num_partitions }}
+default.replication.factor={{ kafka_default_replication_factor }}
+min.insync.replicas={{ kafka_min_insync_replicas }}
+offsets.topic.replication.factor={{ kafka_offsets_topic_replication_factor }}
+transaction.state.log.replication.factor={{ kafka_transaction_state_log_replication_factor }}
+transaction.state.log.min.isr={{ kafka_transaction_state_log_min_isr }}
+
+# Other configurations
+log.retention.hours=168
+log.segment.bytes=1073741824
+log.retention.check.interval.ms=300000
+
+# Authorization
+allow.everyone.if.no.acl.found=false
+authorizer.class.name=org.apache.kafka.metadata.authorizer.StandardAuthorizer
+super.users=User:admin;User:kafka
+
