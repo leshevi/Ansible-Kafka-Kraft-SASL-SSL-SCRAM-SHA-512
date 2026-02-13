@@ -1,0 +1,114 @@
+stages:
+  - ⚒️tool_creation
+  - 🎉test
+  - 🚀deploy
+
+variables:
+  ANSIBLE_PYTHON_INTERPRETER: /usr/bin/python3
+  ANSIBLE_REMOTE_TMP: /tmp
+  ANSIBLE_FORCE_COLOR: 'true'
+  ANSIBLE_STARATEGY: linear
+  ANSIBLE_PIPELINING: 1
+  ANSIBLE_TRANSPORT: ssh
+  ANSIBLE_BECOME_METHOD: 'su' # нужно если поднимаются права через su с вводом пароля от root
+  ANSIBLE_BECOME_USER: root
+  ANSIBLE_BECOME_ASKPASS: 'False'
+  ANSIBLE_FORCE_HANDLER: 'True'
+  ANSIBLE_STDOUT_CALLBACK: "ansible.builtin.default"
+  ANSIBLE_ASK_PASS: 'False'
+  ANSIBLE_NOCOWS: 1
+  ANSIBLE_HOST_KEY_CHECKING: 'false'
+  ANSIBLE_BECOME_EXE: 'sudo -p "Password: " su -'
+  ANSIBLE_DEPRECATION_WARNINGS: 'false'
+  ANSIBLE_TIMEOUT: 30
+  HOSTS_FILE: "hosts.yml"
+  ANSIBLE_ROLES_PATH: "$CI_PROJECT_DIR/roles"
+  CERT: "$CI_PROJECT_DIR/output"
+
+
+image: registry.gitlab.com/ansible_playbooks7843206/best_practices_alpine/ee:jawa
+
+.job_inj:
+  before_script:
+    - eval $(ssh-agent -s)
+    - echo "$SSH_ROOT_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+
+🔨generate_inventory:
+  stage: ⚒️tool_creation
+  tags:
+    - Docker
+  variables:
+    SERVER_IPS: 147.45.109.142,147.45.109.221,147.45.109.121
+    SERVER_NAMES: kafka1,kafka2,kafka3
+  extends: .job_inj
+  script:
+    - |
+      if [ -f "$HOSTS_FILE" ]; then
+        echo "Using existing hosts.yml file"
+      else
+        echo "Generating dynamic hosts.yml file"
+        echo "kafka:" >> hosts.yml
+        echo "  hosts:" >> hosts.yml
+        IFS=',' read -ra SERVER_LIST <<< "$SERVER_IPS"
+        IFS=',' read -ra SERVER_NAMES <<< "$SERVER_NAMES"
+
+        for i in "${!SERVER_LIST[@]}"; do
+          server_ip="${SERVER_LIST[$i]}"
+          server_name="${SERVER_NAMES[$i]:-server$((i+1))}"
+          echo "    $server_name:" >> hosts.yml
+          echo "      ansible_host: $server_ip" >> hosts.yml
+          echo "      ansible_ssh_user: $SSH_USER" >> hosts.yml
+        done
+
+        echo "Файл '$HOSTS_FILE' успешно создан и заполнен."
+      fi
+
+  artifacts:
+    paths:
+      - $HOSTS_FILE
+    expire_in: 1 hour
+
+
+🎉ansible_lint_test:
+  stage: 🎉test
+  dependencies:
+    - 🔨generate_inventory
+  tags:
+    - Docker
+  when: manual
+  extends: .job_inj
+  script:
+    - |
+      echo "Current directory structure:"
+      ls roles/
+
+      echo "Inventory file:"
+      cat hosts.yml
+
+    - ansible --version
+    - ansible-lint --version
+    - ansible-lint -q --offline
+    - ansible all -i hosts.yml -m ping
+
+
+🚀deploy_01:
+  stage: 🚀deploy
+  tags:
+    - Docker
+  extends: .job_inj
+  when: manual
+  dependencies:
+    - 🎉ansible_lint_test
+    - 🔨generate_inventory
+  script:
+    - |
+      echo "Current directory structure:"
+      ls -la
+      ls roles/kafka/templates
+      mkdir -p $CERT
+
+      echo "Inventory file:"
+      cat hosts.yml
+
+      echo "Running playbook..."
+      ansible-playbook -i hosts.yml playbook.yml
