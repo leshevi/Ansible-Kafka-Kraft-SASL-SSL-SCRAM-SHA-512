@@ -1,0 +1,6 @@
+security.protocol={{ kafka_security_protocol }}
+sasl.mechanism=PLAIN
+ssl.truststore.location=/etc/kafka/ssl/kafka.server.truststore.jks
+ssl.truststore.password=changeit
+ssl.endpoint.identification.algorithm=
+sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username="admin" password="admin-secret";
