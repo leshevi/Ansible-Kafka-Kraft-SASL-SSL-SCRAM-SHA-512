@@ -1,0 +1,196 @@
+---
+- name: Install dependencies
+  ansible.builtin.apt:
+    name:
+      - "{{ kafka_java_package }}"
+      - curl
+      - wget
+      - openssl
+      - ca-certificates
+      - acl
+      - ufw
+      - rsync
+      - python3-idna
+      - telnet
+    state: present
+    update_cache: true
+
+- name: Set hostname using hostname module
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Ensure hostname is in /etc/hosts
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1'
+    line: "127.0.1.1 {{ inventory_hostname }} {{ inventory_hostname }}.localdomain"
+    state: present
+
+- name: Add alle hosts and ip to /etc/hosts
+  ansible.builtin.lineinfile:
+    dest: /etc/hosts
+    regexp: '{{ hostvars[item].ansible_default_ipv4.address }}.*{{ item }}$'
+    line: "{{ hostvars[item].ansible_default_ipv4.address }} {{ hostvars[item]['inventory_hostname'] }}"
+    state: present
+  become: true
+  with_items: "{{ groups.all }}"
+
+- name: Create kafka user and group
+  ansible.builtin.group:
+    name: "{{ kafka_group }}"
+    state: present
+
+- name: Create kafka user
+  ansible.builtin.user:
+    name: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    home: "{{ kafka_install_dir }}"
+    shell: /bin/bash
+    system: true
+    create_home: true
+
+- name: Create directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: '0755'
+  loop:
+    - "{{ kafka_install_dir }}"
+    - "{{ kafka_data_dir }}"
+    - "{{ kafka_log_dir }}"
+    - "{{ kafka_ssl_dir }}"
+    - "{{ kafka_install_dir }}/config/kraft"
+
+- name: Download and extract Kafka
+  ansible.builtin.unarchive:
+    src: "{{ kafka_download_url }}"
+    dest: /tmp
+    remote_src: true
+    creates: "/tmp/kafka_{{ kafka_scala_version }}-{{ kafka_version }}"
+
+- name: Copy Kafka to installation directory
+  ansible.builtin.copy:
+    src: "/tmp/kafka_{{ kafka_scala_version }}-{{ kafka_version }}/"
+    dest: "{{ kafka_install_dir }}"
+    remote_src: true
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: '0755'
+
+- name: Create Kafka configuration directory
+  ansible.builtin.file:
+    path: "{{ kafka_install_dir }}/config"
+    state: directory
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: '0755'
+
+- name: Enable ports in firewall
+  community.general.ufw:
+    port: "{{ item }}"
+    rule: allow
+    state: enabled
+    proto: tcp
+  loop: [22, 9092, 9093, 9094]
+  become: true
+
+- name: Enable the firewall
+  community.general.ufw:
+    state: enabled
+
+- name: Generate SSL certificates
+  ansible.builtin.include_tasks: ssl-setup.yml
+  when: kafka_ssl_enabled
+
+- name: Configure JAAS
+  ansible.builtin.template:
+    src: templates/jaas.conf.j2
+    dest: "{{ kafka_install_dir }}/config/sasl.jaas.config"
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: '0600'
+  when: kafka_sasl_enabled
+
+- name: Install Kafka
+  when: ansible_facts['hostname'] == 'kafka1'
+  block:
+    - name: Generate cluster IDs on controller nodes
+      ansible.builtin.command: "{{ kafka_install_dir }}/bin/kafka-storage.sh random-uuid"
+      register: kafka_cluster_id_gen
+      changed_when: false
+
+    - name: Display kafka cluster UUID
+      ansible.builtin.debug:
+        msg: "Kafka Cluster UUID: {{ kafka_cluster_id_gen.stdout }}"
+
+- name: Create server.properties configuration
+  ansible.builtin.template:
+    src: templates/server.properties.j2
+    dest: "{{ kafka_install_dir }}/config/kraft/server.properties"
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: '0644'
+  become: true
+
+- name: Kafka
+  ansible.builtin.shell: "sh {{ kafka_install_dir }}/bin/kafka-storage.sh format -t {{ hostvars[groups['kafka'][0]]['kafka_cluster_id_gen'].stdout }} \
+                          -c {{ kafka_install_dir }}/config/kraft/server.properties"
+  args:
+    executable: /bin/bash
+    creates: "{{ kafka_data_dir }}/meta.properties"
+  changed_when: false
+  become: true
+
+- name: Configure systemd service
+  ansible.builtin.template:
+    src: templates/kafka.service.j2
+    dest: "{{ kafka_systemd_dir }}/kafka.service"
+    mode: '0644'
+  notify: Reload systemd
+
+- name: Set ownership of Kafka directory
+  ansible.builtin.file:
+    path: "{{ kafka_install_dir }}"
+    state: directory
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    recurse: true
+
+- name: Set ownership of SSL directory
+  ansible.builtin.file:
+    path: "{{ kafka_ssl_dir }}"
+    state: directory
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    recurse: true
+  when: kafka_ssl_enabled
+
+- name: Enable and start Kafka service
+  ansible.builtin.systemd:
+    name: kafka
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Create client properties template
+  ansible.builtin.template:
+    src: templates/client.properties.j2
+    dest: "{{ kafka_install_dir }}/config/client.properties"
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: '0644'
+
+- name: Create client properties template
+  ansible.builtin.template:
+    src: templates/root.properties.j2
+    dest: "/tmp/root.properties"
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: '0644'
+
+- name: Configure SASL
+  ansible.builtin.include_tasks: sasl-setup.yml
+  when: kafka_sasl_enabled
+
