@@ -1,0 +1,14 @@
+---
+galaxy_info:
+  role_name: kafka
+  author: leshevi
+  description: A role for installing kafka
+  license: license (GPLv3, MIT, etc)
+  min_ansible_version: "2.9"
+  platforms:
+    - name: Debian
+      versions:
+        - bookworm
+  galaxy_tags:
+    - kafka
+dependencies: []
