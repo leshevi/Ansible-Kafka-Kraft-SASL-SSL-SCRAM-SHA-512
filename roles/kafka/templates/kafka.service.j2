@@ -1,0 +1,18 @@
+[Unit]
+Description=Apache Kafka Server (KRaft)
+Documentation=http://kafka.apache.org
+After=network.target
+
+[Service]
+Type=simple
+User={{ kafka_user }}
+Group={{ kafka_group }}
+Environment="KAFKA_OPTS=-Djava.security.auth.login.config={{ kafka_install_dir }}/config/sasl.jaas.config"
+ExecStart={{ kafka_install_dir }}/bin/kafka-server-start.sh {{ kafka_install_dir }}/config/kraft/server.properties
+ExecStop={{ kafka_install_dir }}/bin/kafka-server-stop.sh
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
