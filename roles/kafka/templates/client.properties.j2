@@ -1,0 +1,14 @@
+# Client configuration for SASL_SSL
+bootstrap.servers={{ groups['kafka'] | map('extract', hostvars, 'ansible_hostname') | join(':9094,') }}:9094
+
+# Security protocol
+security.protocol={{ kafka_security_protocol }}
+
+# SSL Configuration
+ssl.truststore.location={{ kafka_ssl_dir }}/kafka.server.truststore.jks
+ssl.truststore.password={{ kafka_ssl_truststore_password }}
+ssl.endpoint.identification.algorithm=
+
+# SASL Configuration
+sasl.mechanism={{ kafka_sasl_mechanism }}
+sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="admin" password="admin-secret";
