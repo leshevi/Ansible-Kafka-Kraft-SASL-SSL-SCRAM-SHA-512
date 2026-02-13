@@ -1,0 +1,66 @@
+---
+# Kafka version
+kafka_version: "4.1.0"
+kafka_scala_version: "2.13"
+kafka_download_url: "https://downloads.apache.org/kafka/{{ kafka_version }}/kafka_{{ kafka_scala_version }}-{{ kafka_version }}.tgz"
+
+# Installation paths
+kafka_install_dir: "/opt/kafka"
+kafka_data_dir: "/var/lib/kafka"
+kafka_log_dir: "/var/log/kafka"
+
+# Java configuration
+kafka_java_package: "openjdk-17-jdk"
+
+# SSL Configuration
+kafka_ssl_enabled: true
+kafka_ssl_dir: "/etc/kafka/ssl"
+kafka_ca_password: "changeit"
+kafka_key_password: "changeit"
+kafka_ssl_keystore_password: "changeit"
+kafka_ssl_truststore_password: "changeit"
+kafka_ssl_validity_days: 3650
+kafka_ssl_key_size: 4096
+kafka_san_list:
+  - "DNS:{{ inventory_hostname }}"
+  - "DNS:{{ ansible_fqdn }}"
+  - "IP:{{ ansible_default_ipv4.address }}"
+kafka_local_workdir: "{{ lookup('env', 'CI_PROJECT_DIR') | default('/tmp', true) }}/ssl_build/{{ inventory_hostname }}"
+kafka_local: "{{ lookup('env', 'CI_PROJECT_DIR') | default('/tmp', true) }}/ssl_build/localhost"
+
+# SASL Configuration
+kafka_sasl_enabled: true
+kafka_sasl_mechanism: "SCRAM-SHA-512"
+kafka_sasl_users:
+  - username: "admin"
+    password: "admin-secret"
+
+# Security protocol
+kafka_security_protocol: "SASL_SSL"
+
+# Cluster configuration
+kafka_listeners: "INTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:9094"
+kafka_advertised_listeners: "INTERNAL://{{ ansible_host }}:9092,EXTERNAL://{{ ansible_host }}:9094"
+kafka_inter_broker_listener_name: "EXTERNAL"
+kafka_file: "listener.name.external.plain.sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule {{ kafka_constant }}"
+kafka_file_l: "listener.name.external.scram-sha-512.sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule {{ kafka_constant }}"
+kafka_file1: 'listener.name.external.sasl.enabled.mechanisms={{ kafka_sasl_mechanism }},PLAIN'
+kafka_file_line1: 'listener.name.external.sasl.enabled.mechanisms={{ kafka_sasl_mechanism }}'
+kafka_constant: 'required username="admin" password="admin-secret" user_admin="admin-secret";'
+# Kafka configuration
+kafka_num_partitions: 1
+kafka_default_replication_factor: 3
+kafka_min_insync_replicas: 2
+kafka_offsets_topic_replication_factor: 3
+kafka_transaction_state_log_replication_factor: 3
+kafka_transaction_state_log_min_isr: 2
+
+# System configuration
+kafka_user: "kafka"
+kafka_group: "kafka"
+kafka_systemd_dir: "/etc/systemd/system"
+
+kafka_nodes:
+  - { id: 1, host: "kafka1", port_p: 9092, port_c: 9093 }
+  - { id: 2, host: "kafka2", port_p: 9092, port_c: 9093 }
+  - { id: 3, host: "kafka3", port_p: 9092, port_c: 9093 }
