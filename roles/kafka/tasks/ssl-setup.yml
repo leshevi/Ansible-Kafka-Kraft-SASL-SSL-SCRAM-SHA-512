@@ -1,0 +1,99 @@
+- name: Create local build directory
+  delegate_to: localhost
+  become: false
+  ansible.builtin.file:
+    path: "{{ kafka_local_workdir }}"
+    state: directory
+    mode: '0700'
+
+- name: Generate Broker Private Key
+  delegate_to: localhost
+  become: false
+  community.crypto.openssl_privatekey:
+    path: "{{ kafka_local_workdir }}/broker.key"
+    size: "{{ kafka_ssl_key_size }}"
+    type: RSA
+
+- name: Create Certificate Signing Request (CSR)
+  delegate_to: localhost
+  become: false
+  community.crypto.openssl_csr:
+    path: "{{ kafka_local_workdir }}/broker.csr"
+    privatekey_path: "{{ kafka_local_workdir }}/broker.key"
+    common_name: "{{ inventory_hostname }}"
+    subject_alt_name: "{{ kafka_san_list }}"
+    basic_constraints: ["CA:FALSE"]
+    key_usage: ["digitalSignature", "keyEncipherment"]
+    extended_key_usage: ["serverAuth", "clientAuth"]
+
+- name: Sign Broker Certificate with CA
+  delegate_to: localhost
+  become: false
+  community.crypto.x509_certificate:
+    path: "{{ kafka_local_workdir }}/broker.crt"
+    csr_path: "{{ kafka_local_workdir }}/broker.csr"
+    ownca_path: "{{ lookup('env', 'CA_CERT') }}"
+    ownca_privatekey_path: "{{ lookup('env', 'CA_KEY') }}"
+    ownca_privatekey_passphrase: "{{ kafka_key_password }}"
+    provider: ownca
+
+- name: Bundle into PKCS12
+  delegate_to: localhost
+  become: false
+  community.crypto.openssl_pkcs12:
+    action: export
+    path: "{{ kafka_local_workdir }}/kafka.p12"
+    friendly_name: "kafka-broker"
+    privatekey_path: "{{ kafka_local_workdir }}/broker.key"
+    certificate_path: "{{ kafka_local_workdir }}/broker.crt"
+    other_certificates: ["{{ lookup('env', 'CA_CERT') }}"]
+    passphrase: "{{ kafka_key_password }}"
+    state: present
+
+- name: Deploy PKCS12 Keystore
+  ansible.builtin.copy:
+    src: "{{ kafka_local_workdir }}/"
+    dest: "{{ kafka_ssl_dir }}/"
+    owner: kafka
+    group: kafka
+    mode: '0444'
+
+- name: Deploy CA Certificate for Truststore
+  ansible.builtin.copy:
+    src: "{{ lookup('env', 'CA_CERT') }}"
+    dest: "{{ kafka_ssl_dir }}/ca.crt"
+    owner: kafka
+    group: kafka
+    mode: '0444'
+
+- name: Create JKS Truststore from CA Cert
+  community.general.java_cert:
+    cert_path: "{{ kafka_ssl_dir }}/ca.crt"
+    keystore_path: "{{ kafka_ssl_dir }}/kafka.server.truststore.jks"
+    keystore_pass: "{{ kafka_key_password }}"
+    executable: /usr/bin/keytool
+    state: present
+    cert_alias: "kafka-ca"
+    keystore_create: true
+
+# Опционально: конвертация P12 в JKS для старых версий Kafka
+- name: Convert Keystore to JKS
+  ansible.builtin.shell: |
+    keytool -importkeystore \
+    -deststorepass {{ kafka_key_password }} \
+    -destkeystore {{ kafka_ssl_dir }}/kafka.server.keystore.jks \
+    -srckeystore {{ kafka_ssl_dir }}/kafka.keystore.p12 \
+    -srcstoretype PKCS12 \
+    -srcstorepass {{ kafka_key_password }} \
+    -noprompt
+  args:
+    creates: "{{ kafka_ssl_dir }}/kafka.keystore.jks"
+
+- name: Set permissions on SSL files
+  ansible.builtin.file:
+    path: "{{ kafka_ssl_dir }}"
+    state: directory
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: '0750'
+    recurse: true
