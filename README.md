@@ -1,5 +1,5 @@
 Playbook create-key.yml to create a key and certificate, you can run it separately or as you wish. The simplest job for creating
-
+```yml
 stages:
   - 🚀deploy_cert
 
@@ -17,5 +17,5 @@ stages:
     paths:
       - $CERT
     expire_in: 1 week
-
+```
 Then we take the artifacts and add them to Gitlab-ci variables as files and use the rest of the code to create a Kafka cluster.
