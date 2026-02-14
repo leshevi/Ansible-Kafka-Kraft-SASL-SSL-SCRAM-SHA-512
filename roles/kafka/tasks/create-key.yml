@@ -1,0 +1,26 @@
+- name: Generate Root CA locally # ansible-playbook site.yml -i "localhost," -c local -vvv
+  hosts: localhost
+  vars:
+    validity_days: 3650
+    kafka_local_workdir: "{{ lookup('env', 'CI_PROJECT_DIR') | default('/tmp', true) }}/ssl_build"
+  tasks:
+    - name: Create directory for CA
+      ansible.builtin.file:
+        path: "{{ kafka_local_workdir }}"
+        state: directory
+        mode: '0700'
+        owner: ansible
+        group: ansible
+
+    - name: Generate CA private key and certificate
+      ansible.builtin.command: >
+        openssl req -new -x509 -keyout {{ kafka_local_workdir }}/ca.key -out {{ kafka_local_workdir }}/ca.crt
+        -days {{ validity_days }} -subj "/CN=Kafka CA" -passout pass:changeit
+      args:
+        creates: "{{ kafka_local_workdir }}/ca.crt"
+
+    - name: Get log file flatly
+      ansible.builtin.fetch:
+        src: "{{ kafka_local_workdir }}/"
+        dest: output/
+        flat: true
